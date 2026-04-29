@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -sL \"https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar\" -o C:/OSS_Restaurant/auth-service/gradle/wrapper/gradle-wrapper.jar)",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "Bash(docker build *)",
+      "Bash(python3 -c \"import bcrypt; print\\('ok'\\)\")",
+      "Bash(pip install *)",
+      "Bash(python3 -m pip install bcrypt -q)",
+      "Bash(python3 -c \"import bcrypt; print\\(bcrypt.hashpw\\(b'password123', bcrypt.gensalt\\(10\\)\\).decode\\(\\)\\)\")",
+      "Bash(python3 *)",
+      "Bash(xargs grep *)",
+      "WebSearch",
+      "WebFetch(domain:commons.wikimedia.org)"
+    ]
+  }
+}

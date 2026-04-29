@@ -1,0 +1,10 @@
+.env
+*.db
+node_modules/
+dist/
+build/
+.gradle/
+*.jar
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,226 @@
+openapi: 3.0.3
+info:
+  title: Auth Service API
+  description: JWT 기반 회원가입 · 로그인 · 로그아웃 · 토큰 검증 서비스
+  version: 1.0.0
+  contact:
+    name: Restaurant OSS
+    url: http://localhost:80
+
+servers:
+  - url: http://localhost:8081
+    description: 직접 접근
+  - url: http://localhost:80/auth
+    description: API 게이트웨이 경유
+
+tags:
+  - name: Auth
+    description: 회원가입 · 로그인 · 로그아웃 · 토큰 검증
+
+paths:
+  /register:
+    post:
+      tags: [Auth]
+      summary: 회원가입
+      description: username, password, role을 받아 새 계정을 생성합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            examples:
+              customer:
+                summary: 고객 계정 가입
+                value:
+                  username: newuser
+                  password: pass1234
+                  role: CUSTOMER
+              admin:
+                summary: 관리자 계정 가입
+                value:
+                  username: newadmin
+                  password: adminpass1
+                  role: ADMIN
+      responses:
+        '201':
+          description: 가입 성공
+        '400':
+          description: 유효성 검사 실패 (username 3자 이상, password 8자 이상)
+          content:
+            application/json:
+              example:
+                message: 유효하지 않은 요청입니다.
+        '409':
+          description: 이미 존재하는 username
+          content:
+            application/json:
+              example:
+                message: 이미 사용 중인 아이디입니다.
+
+  /login:
+    post:
+      tags: [Auth]
+      summary: 로그인
+      description: 인증 성공 시 JWT accessToken을 반환합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              customer:
+                summary: 고객 로그인
+                value:
+                  username: customer1
+                  password: password123
+              admin:
+                summary: 관리자 로그인
+                value:
+                  username: admin
+                  password: admin1234
+      responses:
+        '200':
+          description: 로그인 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+              example:
+                accessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjdXN0b21lcjEifQ.xxxx
+        '401':
+          description: 비밀번호 불일치
+          content:
+            application/json:
+              example:
+                message: 비밀번호가 올바르지 않습니다.
+        '404':
+          description: 존재하지 않는 username
+          content:
+            application/json:
+              example:
+                message: 존재하지 않는 사용자입니다.
+
+  /logout:
+    post:
+      tags: [Auth]
+      summary: 로그아웃
+      description: 현재 토큰을 Redis 블랙리스트에 등록합니다. 이후 해당 토큰은 사용 불가합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          description: "Bearer {accessToken}"
+          schema:
+            type: string
+            example: Bearer eyJhbGciOiJIUzI1NiJ9...
+      responses:
+        '204':
+          description: 로그아웃 성공
+        '400':
+          description: Authorization 헤더 누락
+
+  /verify:
+    get:
+      tags: [Auth]
+      summary: 토큰 검증 (내부 전용)
+      description: |
+        다른 마이크로서비스(core-service)가 JWT 유효성을 확인하기 위해 호출하는
+        내부 전용 엔드포인트입니다. userId, username, role을 반환합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          description: "Bearer {accessToken}"
+          schema:
+            type: string
+            example: Bearer eyJhbGciOiJIUzI1NiJ9...
+      responses:
+        '200':
+          description: 토큰 유효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyResponse'
+              example:
+                userId: 1
+                username: customer1
+                role: CUSTOMER
+        '401':
+          description: 토큰 만료 또는 블랙리스트 처리됨
+          content:
+            application/json:
+              example:
+                message: 유효하지 않은 토큰입니다.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 로그인 후 발급된 JWT 토큰을 입력하세요.
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 30
+          description: 사용자 아이디 (3~30자)
+          example: newuser
+        password:
+          type: string
+          minLength: 8
+          description: 비밀번호 (8자 이상)
+          example: pass1234
+        role:
+          type: string
+          enum: [CUSTOMER, ADMIN, RIDER]
+          default: CUSTOMER
+          description: 계정 역할
+          example: CUSTOMER
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: customer1
+        password:
+          type: string
+          example: password123
+
+    TokenResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: JWT 액세스 토큰
+          example: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjdXN0b21lcjEifQ.xxxx
+
+    VerifyResponse:
+      type: object
+      properties:
+        userId:
+          type: integer
+          description: 사용자 ID
+          example: 1
+        username:
+          type: string
+          description: 사용자 아이디
+          example: customer1
+        role:
+          type: string
+          enum: [CUSTOMER, ADMIN, RIDER]
+          description: 계정 역할
+          example: CUSTOMER

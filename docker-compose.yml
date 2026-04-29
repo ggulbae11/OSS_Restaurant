@@ -1,0 +1,127 @@
+version: "3.9"
+
+services:
+  # ─────────────────────────────────────────
+  # DB 초기화 (seed.py 실행)
+  # ─────────────────────────────────────────
+  db-init:
+    image: python:3.12-slim
+    working_dir: /workspace
+    volumes:
+      - ./data:/workspace/data
+    command: sh -c "pip install bcrypt -q && python data/seed.py"
+
+  # ─────────────────────────────────────────
+  # Redis
+  # ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # Auth Service
+  # ─────────────────────────────────────────
+  auth-service:
+    build: ./auth-service
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_REDIS_HOST=redis
+      - JWT_SECRET=${JWT_SECRET:-restaurant-secret-key-min-32chars!!}
+      - JWT_EXPIRY_SECONDS=3600
+    volumes:
+      - ./data/auth:/data
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # Core Service
+  # ─────────────────────────────────────────
+  core-service:
+    build: ./core-service
+    ports:
+      - "8082:8082"
+    environment:
+      - SPRING_REDIS_HOST=redis
+      - AUTH_SERVICE_URL=http://auth-service:8081
+      - AI_SERVICE_URL=http://ai-service:8000
+    volumes:
+      - ./data/core:/data
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # AI Service
+  # ─────────────────────────────────────────
+  ai-service:
+    build: ./ai-service
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CORE_SERVICE_URL=http://core-service:8082
+      - RATE_LIMIT_PER_MINUTE=30
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # API Gateway (Nginx)
+  # ─────────────────────────────────────────
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "80:80"
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      core-service:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────
+  # Customer Frontend
+  # ─────────────────────────────────────────
+  frontend-customer:
+    build: ./frontend-customer
+    ports:
+      - "3000:80"
+    depends_on:
+      - api-gateway
+
+  # ─────────────────────────────────────────
+  # Admin Frontend
+  # ─────────────────────────────────────────
+  frontend-admin:
+    build: ./frontend-admin
+    ports:
+      - "3001:80"
+    depends_on:
+      - api-gateway
+
+volumes: {}

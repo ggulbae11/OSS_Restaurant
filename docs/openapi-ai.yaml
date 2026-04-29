@@ -1,0 +1,683 @@
+openapi: 3.0.3
+info:
+  title: AI Service API
+  description: |
+    GPT-4o-mini 기반 식당 운영 AI 마이크로서비스.
+
+    ## Rate Limit
+    IP당 엔드포인트별로 분당 요청 수가 제한됩니다.
+    초과 시 HTTP **429 Too Many Requests**가 반환됩니다.
+
+    ## 모델
+    OpenAI **GPT-4o-mini** 사용 (temperature 0.7, max_tokens 512)
+  version: 1.0.0
+  contact:
+    name: Restaurant OSS
+    url: http://localhost:80
+
+servers:
+  - url: http://localhost:8000
+    description: 직접 접근
+  - url: http://localhost:80/ai
+    description: API 게이트웨이 경유
+
+tags:
+  - name: 추천
+    description: 사용자 요청·시간대·이력 기반 메뉴 추천
+  - name: 리뷰
+    description: 리뷰 초안 생성 및 유해 콘텐츠 검열
+  - name: 메뉴 관리
+    description: 신메뉴 제안, 정책 검사, 품질 점검
+  - name: 운영
+    description: 대기 시간 예측 및 조리 순서 최적화
+  - name: 헬스체크
+    description: 서비스 상태 확인
+
+paths:
+
+  /health:
+    get:
+      tags: [헬스체크]
+      summary: 서비스 상태 확인
+      responses:
+        '200':
+          description: 서비스 정상
+          content:
+            application/json:
+              example:
+                status: ok
+
+  # ── 추천 ─────────────────────────────────────────────────────────────────
+
+  /ai/recommend:
+    post:
+      tags: [추천]
+      summary: 메뉴 추천
+      description: |
+        현재 판매 중인 메뉴를 core-service에서 실시간으로 조회한 뒤,
+        사용자 요청 메시지·시간대·이전 주문 이력을 분석해 최대 3개 메뉴를 추천합니다.
+
+        **Rate Limit**: 30회/분
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendRequest'
+            examples:
+              lunch:
+                summary: 점심 추천 (이전 주문 포함)
+                value:
+                  message: 맵지 않은 것 추천해줘
+                  time: lunch
+                  userHistory: [1, 3]
+              simple:
+                summary: 단순 추천
+                value:
+                  message: 오늘 뭐 먹을까요?
+      responses:
+        '200':
+          description: 추천 결과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendResponse'
+              example:
+                recommendedMenuIds: [2, 6, 11]
+                reason: 된장찌개와 비빔밥은 자극적이지 않아 점심에 잘 어울립니다.
+        '429':
+          description: Rate Limit 초과
+
+  # ── 리뷰 ─────────────────────────────────────────────────────────────────
+
+  /ai/review/generate:
+    post:
+      tags: [리뷰]
+      summary: 리뷰 초안 생성
+      description: |
+        메뉴 ID와 키워드를 바탕으로 자연스러운 리뷰 초안을 생성합니다.
+
+        **Rate Limit**: 20회/분
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateReviewRequest'
+            examples:
+              casual:
+                summary: 친근한 말투
+                value:
+                  menuId: 1
+                  keywords: ["국물", "매콤", "든든함"]
+                  tone: casual
+              formal:
+                summary: 격식체
+                value:
+                  menuId: 1
+                  keywords: ["깊은 맛", "정갈한"]
+                  tone: formal
+      responses:
+        '200':
+          description: 생성된 리뷰 초안
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateReviewResponse'
+              example:
+                rating: 5
+                content: 국물이 정말 매콤하고 든든해서 점심으로 딱이에요. 다음에도 꼭 시킬 것 같아요!
+        '429':
+          description: Rate Limit 초과
+
+  /ai/review/moderate:
+    post:
+      tags: [리뷰]
+      summary: 리뷰 검열
+      description: |
+        리뷰 텍스트를 분석해 3단계로 분류합니다.
+
+        | 상태 | score 범위 | 설명 |
+        |------|-----------|------|
+        | NORMAL | 0.0 ~ 0.3 | 일반 리뷰 |
+        | SUSPICIOUS | 0.3 ~ 0.7 | 경계선 표현 — 관리자 검토 권장 |
+        | BLOCKED | 0.7 ~ 1.0 | 욕설·허위사실 — 노출 차단 |
+
+        **Rate Limit**: 60회/분
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModerateRequest'
+            examples:
+              normal:
+                summary: 일반 리뷰
+                value:
+                  content: 김치찌개가 정말 맛있어요!
+              suspicious:
+                summary: 의심 리뷰
+                value:
+                  content: 여기 음식이 최악이고 사장이 불친절해요
+      responses:
+        '200':
+          description: 검열 결과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerateResponse'
+              examples:
+                normal:
+                  summary: 정상 리뷰
+                  value:
+                    status: NORMAL
+                    reason: 일반적인 긍정 리뷰로 문제없음
+                    score: 0.05
+                blocked:
+                  summary: 차단 리뷰
+                  value:
+                    status: BLOCKED
+                    reason: 명확한 욕설 및 허위 사실 포함
+                    score: 0.92
+        '429':
+          description: Rate Limit 초과
+
+  # ── 메뉴 관리 ─────────────────────────────────────────────────────────────
+
+  /ai/menu/new:
+    post:
+      tags: [메뉴 관리]
+      summary: 신메뉴 아이디어 제안
+      description: |
+        매출 데이터(salesData)를 전달하면 AI가 새로운 메뉴 1건을 추천합니다.
+        salesData 생략 시 일반적인 제안을 반환합니다.
+
+        **Rate Limit**: 10회/분
+      requestBody:
+        required: false
+        content:
+          application/json:
+            examples:
+              withData:
+                summary: 매출 데이터 포함
+                value:
+                  salesData: "김치찌개 150건, 된장찌개 80건, 짜장면 120건 (최근 1주일)"
+              empty:
+                summary: 데이터 없이 요청
+                value: {}
+      responses:
+        '200':
+          description: 신메뉴 추천 결과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewMenuResponse'
+              example:
+                name: 된장 크림 파스타
+                estimatedPrice: 13000
+                reason: 한식·양식 퓨전 트렌드에 맞고 기존 재료 재활용 가능
+                suggestion: 된장과 크림 소스를 결합한 퓨전 파스타로, 기존 된장 재고를 활용할 수 있습니다.
+        '429':
+          description: Rate Limit 초과
+
+  /ai/policy/check:
+    post:
+      tags: [메뉴 관리]
+      summary: 메뉴 정책 검사
+      description: |
+        메뉴 등록 전 이름·가격·설명이 운영 정책을 준수하는지 검사합니다.
+
+        **검사 항목**
+        - 이름: 2~30자, 욕설 금지
+        - 가격: 100원 ~ 100,000원
+        - 설명: 허위·과장 표현 금지
+
+        **Rate Limit**: 30회/분
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyCheckRequest'
+            examples:
+              pass:
+                summary: 정책 통과
+                value:
+                  name: 삼겹살 구이
+                  price: 14000
+                  description: 국내산 삼겹살을 직화로 구워드립니다.
+              fail:
+                summary: 정책 위반 (가격 초과)
+                value:
+                  name: 프리미엄 한우
+                  price: 200000
+                  description: 최고급 한우입니다.
+      responses:
+        '200':
+          description: 검사 결과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyCheckResponse'
+              examples:
+                pass:
+                  summary: 통과
+                  value:
+                    passed: true
+                    issues: []
+                fail:
+                  summary: 위반
+                  value:
+                    passed: false
+                    issues: ["가격이 100,000원을 초과합니다."]
+        '429':
+          description: Rate Limit 초과
+
+  /ai/quality/check:
+    post:
+      tags: [메뉴 관리]
+      summary: 메뉴 품질 점검
+      description: |
+        리뷰 요약과 평균 별점을 바탕으로 메뉴 품질을 0~10점으로 평가합니다.
+
+        **action 값**
+        - `KEEP`: 현 상태 유지
+        - `IMPROVE`: 개선 필요
+        - `REMOVE`: 메뉴 제거 권장
+
+        **Rate Limit**: 20회/분
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityCheckRequest'
+            example:
+              menuId: 1
+              avgRating: 4.2
+              reviewSummary: "국물이 진하다는 긍정 의견 많음. 간이 짜다는 의견 일부 있음."
+      responses:
+        '200':
+          description: 품질 점검 결과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityCheckResponse'
+              examples:
+                keep:
+                  summary: 유지
+                  value:
+                    score: 8.2
+                    feedback: 전반적으로 긍정적인 평가를 받고 있으며 간 조절만 개선하면 더 좋을 것 같습니다.
+                    action: KEEP
+                improve:
+                  summary: 개선 필요
+                  value:
+                    score: 4.5
+                    feedback: 부정적인 리뷰가 늘고 있어 레시피 개선이 필요합니다.
+                    action: IMPROVE
+        '429':
+          description: Rate Limit 초과
+
+  # ── 운영 ─────────────────────────────────────────────────────────────────
+
+  /ai/time/predict:
+    post:
+      tags: [운영]
+      summary: 예상 대기 시간 계산
+      description: |
+        현재 주문 수와 조리 능력을 기반으로 예상 대기 시간을 계산합니다.
+
+        **계산 공식**
+        ```
+        estimatedTime = max(⌈(activeOrderCount × avgCookTime) / capacity⌉, avgCookTime)
+        ```
+
+        계산 결과와 함께 AI가 생성한 고객 안내 문구도 반환합니다.
+
+        **Rate Limit**: 60회/분
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimePredictRequest'
+            examples:
+              busy:
+                summary: 혼잡한 상황
+                value:
+                  activeOrderCount: 5
+                  avgCookTime: 15
+                  capacity: 2
+              quiet:
+                summary: 여유로운 상황
+                value:
+                  activeOrderCount: 1
+                  avgCookTime: 10
+                  capacity: 3
+      responses:
+        '200':
+          description: 예상 대기 시간
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimePredictResponse'
+              example:
+                estimatedTime: 38
+                explanation: 현재 주문이 많아 약 38분 후에 준비될 예정이오니 조금만 기다려 주세요!
+        '422':
+          description: 유효성 검사 실패 (activeOrderCount 0 이상, capacity 1 이상)
+        '429':
+          description: Rate Limit 초과
+
+  /ai/cook/sequence:
+    post:
+      tags: [운영]
+      summary: 조리 순서 최적화
+      description: |
+        주문된 메뉴 목록을 받아 주방 효율을 극대화하는 조리 순서를 반환합니다.
+
+        **기본 전략**: LPT(Longest Processing Time) — 조리 시간이 긴 메뉴부터 시작
+        AI가 같은 카테고리 재료를 묶는 추가 최적화를 수행합니다.
+        items가 비어있으면 빈 order 배열을 반환합니다.
+
+        **Rate Limit**: 30회/분
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CookSequenceRequest'
+            example:
+              items:
+                - menuId: 1
+                  cookTime: 15
+                  menuName: 김치찌개
+                - menuId: 2
+                  cookTime: 12
+                  menuName: 된장찌개
+                - menuId: 3
+                  cookTime: 20
+                  menuName: 불고기
+      responses:
+        '200':
+          description: 최적화된 조리 순서
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CookSequenceResponse'
+              example:
+                order: [3, 1, 2]
+                reason: 불고기(20분)를 먼저 시작하고, 김치찌개(15분), 된장찌개(12분) 순으로 조리하면 동시에 완료됩니다.
+        '429':
+          description: Rate Limit 초과
+
+components:
+  schemas:
+
+    RecommendRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: 사용자 요청 메시지
+          example: 맵지 않은 것 추천해줘
+        time:
+          type: string
+          enum: [breakfast, lunch, dinner, snack]
+          nullable: true
+          description: 시간대
+          example: lunch
+        userHistory:
+          type: array
+          items:
+            type: integer
+          nullable: true
+          description: 이전에 주문한 menuId 목록
+          example: [1, 3]
+
+    RecommendResponse:
+      type: object
+      properties:
+        recommendedMenuIds:
+          type: array
+          items:
+            type: integer
+          description: 추천 메뉴 ID 목록 (최대 3개)
+          example: [2, 6, 11]
+        reason:
+          type: string
+          description: 추천 이유
+          example: 된장찌개와 비빔밥은 자극적이지 않아 점심에 잘 어울립니다.
+
+    GenerateReviewRequest:
+      type: object
+      required: [menuId]
+      properties:
+        menuId:
+          type: integer
+          description: 리뷰를 작성할 메뉴 ID
+          example: 1
+        keywords:
+          type: array
+          items:
+            type: string
+          description: 포함할 키워드 목록
+          example: ["국물", "매콤", "든든함"]
+        tone:
+          type: string
+          enum: [casual, formal]
+          default: casual
+          description: 말투 (casual=친근, formal=격식)
+          example: casual
+
+    GenerateReviewResponse:
+      type: object
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: 생성된 별점
+          example: 5
+        content:
+          type: string
+          description: 생성된 리뷰 내용 (50~200자)
+          example: 국물이 정말 매콤하고 든든해서 점심으로 딱이에요!
+
+    ModerateRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          description: 검열할 리뷰 텍스트
+          example: 김치찌개가 정말 맛있어요!
+
+    ModerateResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [NORMAL, SUSPICIOUS, BLOCKED]
+          description: 검열 결과
+          example: NORMAL
+        reason:
+          type: string
+          description: 판단 이유
+          example: 일반적인 긍정 리뷰로 문제없음
+        score:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: 문제 심각도 점수 (높을수록 문제 있음)
+          example: 0.05
+
+    NewMenuResponse:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+          description: 제안 메뉴 이름
+          example: 된장 크림 파스타
+        estimatedPrice:
+          type: integer
+          nullable: true
+          description: 예상 가격 (원)
+          example: 13000
+        reason:
+          type: string
+          nullable: true
+          description: 추천 이유
+          example: 한식·양식 퓨전 트렌드에 맞고 기존 재료 재활용 가능
+        suggestion:
+          type: string
+          description: 상세 설명
+          example: 된장과 크림 소스를 결합한 퓨전 파스타로, 기존 된장 재고를 활용할 수 있습니다.
+
+    PolicyCheckRequest:
+      type: object
+      required: [name, price]
+      properties:
+        name:
+          type: string
+          description: 메뉴 이름
+          example: 삼겹살 구이
+        price:
+          type: integer
+          description: 가격 (원)
+          example: 14000
+        description:
+          type: string
+          nullable: true
+          description: 메뉴 설명
+          example: 국내산 삼겹살을 직화로 구워드립니다.
+
+    PolicyCheckResponse:
+      type: object
+      properties:
+        passed:
+          type: boolean
+          description: 정책 통과 여부
+          example: true
+        issues:
+          type: array
+          items:
+            type: string
+          description: 위반 항목 목록 (통과 시 빈 배열)
+          example: []
+
+    QualityCheckRequest:
+      type: object
+      required: [menuId]
+      properties:
+        menuId:
+          type: integer
+          description: 메뉴 ID
+          example: 1
+        avgRating:
+          type: number
+          format: float
+          nullable: true
+          description: 평균 별점
+          example: 4.2
+        reviewSummary:
+          type: string
+          nullable: true
+          description: 리뷰 요약
+          example: 국물이 진하다는 긍정 의견 많음. 간이 짜다는 의견 일부 있음.
+
+    QualityCheckResponse:
+      type: object
+      properties:
+        score:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 10.0
+          description: 품질 점수 (0~10)
+          example: 8.2
+        feedback:
+          type: string
+          description: AI 피드백
+          example: 전반적으로 긍정적인 평가를 받고 있으며 간 조절만 개선하면 더 좋을 것 같습니다.
+        action:
+          type: string
+          enum: [KEEP, IMPROVE, REMOVE]
+          description: 권장 조치
+          example: KEEP
+
+    TimePredictRequest:
+      type: object
+      required: [activeOrderCount, avgCookTime, capacity]
+      properties:
+        activeOrderCount:
+          type: integer
+          minimum: 0
+          description: 현재 대기 중인 주문 수
+          example: 5
+        avgCookTime:
+          type: integer
+          minimum: 1
+          description: 평균 조리 시간 (분)
+          example: 15
+        capacity:
+          type: integer
+          minimum: 1
+          description: 동시 조리 가능한 주문 수
+          example: 2
+
+    TimePredictResponse:
+      type: object
+      properties:
+        estimatedTime:
+          type: integer
+          description: 예상 대기 시간 (분)
+          example: 38
+        explanation:
+          type: string
+          description: AI가 생성한 고객 안내 문구
+          example: 현재 주문이 많아 약 38분 후에 준비될 예정이오니 조금만 기다려 주세요!
+
+    CookSequenceRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CookItem'
+
+    CookItem:
+      type: object
+      required: [menuId, cookTime]
+      properties:
+        menuId:
+          type: integer
+          description: 메뉴 ID
+          example: 1
+        cookTime:
+          type: integer
+          description: 조리 시간 (분)
+          example: 15
+        menuName:
+          type: string
+          description: 메뉴 이름 (AI 설명에 활용)
+          example: 김치찌개
+
+    CookSequenceResponse:
+      type: object
+      properties:
+        order:
+          type: array
+          items:
+            type: integer
+          description: 최적화된 menuId 순서
+          example: [3, 1, 2]
+        reason:
+          type: string
+          description: AI 설명
+          example: 불고기(20분)를 먼저 시작하고, 김치찌개(15분), 된장찌개(12분) 순으로 조리합니다.
