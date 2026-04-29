@@ -3,6 +3,28 @@
 MSA(마이크로서비스 아키텍처) 구조로 구축된 식당 운영 풀스택 웹 서비스입니다.  
 고객 주문·리뷰부터 관리자 메뉴 운영까지 GPT-4o-mini 기반 AI 기능을 통합한 플랫폼입니다.
 
+![Spring Boot](https://img.shields.io/badge/Spring_Boot_3-6DB33F?style=flat-square&logo=springboot&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Vue.js](https://img.shields.io/badge/Vue_3-4FC08D?style=flat-square&logo=vue.js&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+![OpenAI](https://img.shields.io/badge/GPT--4o--mini-412991?style=flat-square&logo=openai&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white)
+
+---
+
+## 목차
+
+- [기술 스택](#기술-스택)
+- [서비스 구성](#서비스-구성)
+- [아키텍처](#아키텍처)
+- [빠른 시작](#빠른-시작)
+- [기본 계정](#기본-계정)
+- [API 명세](#api-명세)
+- [AI 기능 상세](#ai-기능-상세)
+- [주문 상태 흐름](#주문-상태-흐름)
+- [프로젝트 구조](#프로젝트-구조)
+- [시드 데이터 재초기화](#시드-데이터-재초기화)
+
 ---
 
 ## 기술 스택
@@ -278,5 +300,3 @@ docker compose up --build
 ```
 
 시드 데이터만 수정하려면 `data/seed.py` 파일의 `USERS`, `MENUS`, `CATEGORIES` 등 상수를 편집한 뒤 위 명령을 실행하세요.
-#   O S S _ R e s t a u r a n t  
- 
